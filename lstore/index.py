@@ -249,27 +249,25 @@ class Index:
         # One index for each table. All are empty initially
         self.table = table
         self.t = t
-        self.indices = [None] * table.num_columns
+        self.indices = {}
 
     """
     # returns the location of all records with the given value on column "column"
     """
-    def locate(self, column, value):
-        # If column is out of range or no index exists for the column, return empty list
-        if column >= len(self.indices) or self.indices[column] is None:
-            return []
-        # Return the list of RIDs for the given value in the column, empty list if value not found
-        return self.indices[column].search(value)
+    def locate(self, column_number, column_value):
+        if column_number in self.indices:
+            return self.indices[column_number].search(column_value)
+        else:
+            return [rid for rid, record in self.table.page_directory.items() if record.columns[column_number] == column_value]
 
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end"
     """
-    def locate_range(self, begin, end, column):
-        # If column is out of range or no index exists for the column, return empty list
-        if column >= len(self.indices) or self.indices[column] is None:
-            return []
-        # Return the list of RIDs for the given range in the column, empty list if no records found
-        return self.indices[column].traverse(begin, end)
+    def locate_range(self, start_value, end_value, column_number):
+        if column_number in self.indices:
+            return self.indices[column_number].traverse(start_value, end_value)
+        else:
+            return [rid for rid, record in self.table.page_directory.items() if start_value <= record.columns[column_number] <= end_value]
 
 
     """
@@ -283,24 +281,18 @@ class Index:
             value = record.columns[column_number]
             self.indices[column_number].insert(value, rid)
 
-    def insert(self, key, rid):
-        # If index for the column does not exist, create one
-        if self.indices[0] is None:
-            self.create_index(0)
-        # Insert the key and RID into the index using the B-Tree
-        self.indices[0].insert(key, rid)
-
+    def insert(self, column_value, rid):
+        for column_number, tree in self.indices.items():
+            tree.insert(column_value, rid)
     """
     # optional: Drop index of specific column
     """
     def drop_index(self, column_number):
-        # If column is out of range, do nothing
-        if column_number >= len(self.indices):
-            return
-        # Drop index for the column
-        self.indices[column_number] = None
+        if column_number in self.indices:
+            del self.indices[column_number]
+
 
     # Delete a value from the index
-    def delete(self, column, value):
-        if column < len(self.indices) and self.indices[column] is not None:
-            self.indices[column].delete(value)
+    def delete(self, column_value, rid):
+        for column_number, tree in self.indices.items():
+            tree.delete(column_value, rid)
