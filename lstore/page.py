@@ -43,7 +43,7 @@ class BasePage:
     def __init__(self, num_cols):
         # Initialize the page 
         # Records are logically alligned
-        self.rid = [None] * RECORDS_PER_PAGE
+        self.rid = []
         self.num_cols = num_cols
         self.num_records = 0
         self.indirection = []
@@ -86,7 +86,7 @@ class TailPage:
     def __init__(self, num_cols):
         # Initialize the page 
         # Records are logically alligned
-        self.rid = [None] * RECORDS_PER_PAGE
+        self.rid = []
         self.num_cols = num_cols
         self.num_records = 0
         self.indirection = []

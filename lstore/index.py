@@ -43,9 +43,7 @@ class BPlusTree:
         i = 0
         while i < len(leaf.keys) and leaf.keys[i][0] < key:
             i += 1
-        # Skip if duplicate
-        if i < len(leaf.keys) and leaf.keys[i][0] == key:
-            return
+        
         leaf.keys.insert(i, (key, rid))
         if len(leaf.keys) > (self.t * 2) - 1:
             self.split_leaf(leaf)
@@ -137,31 +135,21 @@ class BPlusTree:
         return result
 
     # Deletion operation
-    def delete(self, key):
+    def delete(self, key, rid):
         leaf = self.find_leaf(key)
 
-        # Binary search to find the key
-        left, right = 0, len(leaf.keys)
-        while left < right:
-            mid = (left + right) // 2
-            if leaf.keys[mid][0] < key:
-                left = mid + 1
-            else:
-                right = mid
-
-        # If key exists, remove it
-        if left < len(leaf.keys) and leaf.keys[left][0] == key:
-            leaf.keys.pop(left)
-
-            # Handle root case
-            if leaf == self.root:
-                if not leaf.keys:
-                    self.root = BPlusTreeNode(leaf=True)
+        for i, (k, r) in enumerate(leaf.keys):
+            if k == key and r == rid:
+                leaf.keys.pop(i)
+                # Handle root case
+                if leaf == self.root:
+                    if not leaf.keys:
+                        self.root = BPlusTreeNode(leaf=True)
+                    return
+                # Fix underflow if necessary
+                if len(leaf.keys) < self.t:
+                    self.fix_structure(leaf)
                 return
-
-            # Fix underflow if necessary
-            if len(leaf.keys) < self.t:
-                self.fix_structure(leaf)
 
     # Restoration function for keeping structure after deletion
     def fix_structure(self, node):
