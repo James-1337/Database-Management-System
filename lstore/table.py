@@ -121,90 +121,49 @@ class Table:
             return Record(rid, key, values)
 
     def insert_record(self, start_time, schema_encoding, *columns):
-        """
-        Insert a record using the bufferpool for page access.
-        """
         with self.lock:
-            
-            # Check if key already exists
             key = columns[self.key]
-            if self.index.locate(self.key, key):
-                return False  # Duplicate key
-            
+            transaction_id = getattr(self.database, 'current_transaction_id', None)
+
+            if not self.index.insert(key, None, transaction_id):  # Check and lock
+                return False  # Duplicate key or lock failure
+
             try:
-                # Get the current base page
                 page_range, base_page = self.find_current_base_page()
-                record_index = base_page.num_records  # Current index for the new record
+                record_index = base_page.num_records
+                rid = (self.page_ranges.index(page_range), page_range.base_pages.index(base_page), record_index, "b")
+                page_identifier = ("base", self.page_ranges.index(page_range), page_range.base_pages.index(base_page))
+                page_data = self.database.bufferpool.get_page(page_identifier, self.name, self.num_columns)
 
-                # Determine page identifiers
-                page_range_id = self.page_ranges.index(page_range)
-                page_id = page_range.base_pages.index(base_page)
-
-                # Create RID
-                rid = (page_range_id, page_id, record_index, "b")
-
-                # Create page identifier for bufferpool
-                page_identifier = ("base", page_range_id, page_id)
-
-                # Get page from bufferpool
-                page_data = self.database.bufferpool.get_page(
-                    page_identifier, self.name, self.num_columns
-                )
-
-                # Make sure the page has the expected structure
                 if "columns" not in page_data:
                     page_data["columns"] = [[] for _ in range(self.num_columns)]
-                if "indirection" not in page_data:
-                    page_data["indirection"] = []
-                if "rid" not in page_data:
-                    page_data["rid"] = []
-                if "timestamp" not in page_data:
-                    page_data["timestamp"] = []
-                if "schema_encoding" not in page_data:
-                    page_data["schema_encoding"] = []
+                if "indirection" not in page_data: page_data["indirection"] = []
+                if "rid" not in page_data: page_data["rid"] = []
+                if "timestamp" not in page_data: page_data["timestamp"] = []
+                if "schema_encoding" not in page_data: page_data["schema_encoding"] = []
 
-                # Insert record metadata
                 page_data["indirection"].append(rid)
                 page_data["rid"].append(rid)
                 page_data["timestamp"].append(start_time)
                 page_data["schema_encoding"].append(schema_encoding)
-
-                # Insert column values
                 for i, value in enumerate(columns):
-                    # Make sure there are enough column lists
                     while i >= len(page_data["columns"]):
                         page_data["columns"].append([])
-
-                    # Add the value to the appropriate column
                     page_data["columns"][i].append(value)
+                    base_page.pages[i].write(value)
 
-                    # Also insert into the direct page (for consistency)
-                    try:
-                        base_page.pages[i].write(value)
-                    except Exception as e:
-                        print(f"Warning: Failed to write to direct page: {e}")
-
-                # Update the page in the bufferpool
                 self.database.bufferpool.set_page(page_identifier, self.name, page_data)
-
-                # Unpin the page
                 self.database.bufferpool.unpin_page(page_identifier, self.name)
 
-                # Update the base_page metadata
                 base_page.num_records += 1
                 base_page.indirection.append(rid)
                 base_page.schema_encoding.append(schema_encoding)
-                base_page.start_time.append(start_time)
+                base_page.start_time.append(rid)
                 base_page.rid.append(rid)
 
-                # Add to page directory
-                record = Record(rid, columns[self.key], list(columns))
+                record = Record(rid, key, list(columns))
                 self.page_directory[rid] = record
-
-                # Insert key to the index
-                key = columns[self.key]
-                self.index.insert(key, rid)
-
+                self.index.insert(key, rid, transaction_id)  # Final insert with RID
                 return True
             except Exception as e:
                 print(f"Error in insert_record: {e}")

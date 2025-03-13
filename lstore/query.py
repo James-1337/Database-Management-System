@@ -217,12 +217,12 @@ class Query:
         rids = self.table.index.locate(search_key_index, search_key)
         if not rids:
             return []
-        
+
         # Get alls the base rids first
         base_rids = [rid for rid in rids if rid[3] == "b"]
         # Then, we get the first base rid. If there's no base rid just get first rid from list
         base_rid = base_rids[0] if base_rids else rids[0]
-        
+
         result = []
 
         try:
