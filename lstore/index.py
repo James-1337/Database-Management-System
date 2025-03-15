@@ -238,8 +238,6 @@ class Index:
         self.table = table
         self.t = t
         self.indices = {}
-        from lstore.db import LockManager
-        self.lock_manager = LockManager()
 
     """
     # returns the location of all records with the given value on column "column"
@@ -271,27 +269,9 @@ class Index:
             value = record.columns[column_number]
             self.indices[column_number].insert(value, rid)
 
-    def insert(self, column_value, rid, transaction_id=None):
-        if transaction_id:
-            # Acquire a CHECK lock to verify duplicates
-            if not self.lock_manager.acquire_lock(transaction_id, column_value, "check"):
-                return False
-            # Check for duplicates
-            if self.table.key in self.indices and self.indices[self.table.key].search(column_value):
-                self.lock_manager.release_lock(transaction_id, column_value)
-                return False
-            # Upgrade to WRITE lock for insertion
-            if not self.lock_manager.upgrade_lock(transaction_id, column_value):
-                self.lock_manager.release_lock(transaction_id, column_value)
-                return False
-
+    def insert(self, column_value, rid):
         for column_number, tree in self.indices.items():
             tree.insert(column_value, rid)
-
-        if transaction_id:
-            self.lock_manager.release_lock(transaction_id, column_value)
-        return True
-
     """
     # optional: Drop index of specific column
     """
@@ -301,10 +281,6 @@ class Index:
 
 
     # Delete a value from the index
-    def delete(self, column_value, rid, transaction_id=None):
-        if transaction_id and not self.lock_manager.acquire_lock(transaction_id, column_value, "delete"):
-            return False
+    def delete(self, column_value, rid):
         for column_number, tree in self.indices.items():
             tree.delete(column_value, rid)
-        if transaction_id:
-            self.lock_manager.release_lock(transaction_id, column_value)

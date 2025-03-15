@@ -30,10 +30,10 @@ class TransactionWorker:
         """
         Starts execution of all transactions in a separate thread
         """
-        print(f"Creating worker thread with {len(self.transactions)} transactions")
+        # print(f"Creating worker thread with {len(self.transactions)} transactions")
         self.thread = Thread(target=self.__run)  # Create a thread to run transactions
         self.thread.start()
-        print("Worker thread started")
+        # print("Worker thread started")
 
     def join(self):
         """
@@ -46,13 +46,13 @@ class TransactionWorker:
         """
         Private method to execute all transactions and record their results
         """
-        print(f"Worker started, processing {len(self.transactions)} transactions")
+        # print(f"Worker started, processing {len(self.transactions)} transactions")
         for i, transaction in enumerate(self.transactions):
-            print(f"Starting transaction {i+1}/{len(self.transactions)}")
+            # print(f"Starting transaction {i+1}/{len(self.transactions)}")
             try:
                 # Execute each transaction and record whether it committed or aborted
                 result = transaction.run()
-                print(f"Transaction {i+1} completed with result: {result}")
+                # print(f"Transaction {i+1} completed with result: {result}")
                 self.stats.append(True if result is True else False)
             except Exception as e:
                 print(f"Transaction {i+1} failed with error: {e}")
@@ -60,4 +60,4 @@ class TransactionWorker:
         
         # Calculate number of transactions that committed successfully
         self.result = sum(1 for x in self.stats if x is True)
-        print(f"Worker completed, {self.result} transactions committed successfully")
+        # print(f"Worker completed, {self.result} transactions committed successfully")

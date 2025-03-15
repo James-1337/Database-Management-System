@@ -3,7 +3,6 @@ import msgpack
 from lstore.config import BUFFERPOOL_SIZE, MAX_BASE_PAGES, RECORDS_PER_PAGE, DEFAULT_DB_PATH
 from lstore.table import Table, Record
 from threading import RLock
-from enum import Enum
 
 
 
@@ -15,6 +14,9 @@ class Database:
         self.bufferpool_size = BUFFERPOOL_SIZE
         self.lock_manager = LockManager()
         self.open(DEFAULT_DB_PATH)
+        #self.create_grades_table()
+
+
 
     def open(self, path):
         """
@@ -443,10 +445,6 @@ class Bufferpool:
         # Default case for simple page IDs
         return os.path.join(self.path, table_name, f"{page_id}.msg")
 
-class LockType(Enum):
-    CHECK = 1
-    WRITE = 2
-
 class LockManager:
     def __init__(self):
         """
@@ -459,7 +457,7 @@ class LockManager:
         self.locks = {}  # key: rid, value: (set of shared lock tids, exclusive lock tid or None)
         self.mutex = RLock()
 
-    def acquire_lock(self, transaction_id, primary_key, operation):
+    def acquire_lock(self, transaction_id, record_id, operation):
         """
         Acquires a lock for a transaction on a specific record
 
@@ -471,71 +469,58 @@ class LockManager:
         Returns:
             bool: True if the lock was acquired and False otherwise
         """
+        # Determine the lock type based on the operation
+        lock_type = "exclusive" if operation in ["update", "insert", "delete"] else "shared"
         with self.mutex:
-            lock_type = LockType.CHECK if operation == "check" else LockType.WRITE
+            # Initialize the lock state if the record is not yet present.
+            if record_id not in self.locks:
+                self.locks[record_id] = (set(), None)
+            shared_lock_tids, exclusive_lock_tid = self.locks[record_id]
 
-            # Initialize lock state if primary_key is not locked
-            if primary_key not in self.locks:
-                self.locks[primary_key] = (set(), None)
-
-            check_locks, write_lock = self.locks[primary_key]
-
-            if lock_type == LockType.CHECK:
-                # Grant CHECK lock if no WRITE lock exists or if this transaction holds the WRITE lock
-                if write_lock is None or write_lock == transaction_id:
-                    check_locks.add(transaction_id)
+            if lock_type == "shared":
+                # Grant shared lock if no exclusive lock exists or if this transaction already holds exclusive
+                if exclusive_lock_tid is None or exclusive_lock_tid == transaction_id:
+                    shared_lock_tids.add(transaction_id)
+                    self.locks[record_id] = (shared_lock_tids, exclusive_lock_tid)
                     return True
                 return False
 
-            elif lock_type == LockType.WRITE:
-                # Grant WRITE lock if:
-                # 1. No other locks exist, or
-                # 2. This transaction already holds the WRITE lock, or
-                # 3. This transaction holds the only CHECK lock and no WRITE lock exists
-                if (not check_locks and write_lock is None) or \
-                        write_lock == transaction_id or \
-                        (check_locks == {transaction_id} and write_lock is None):
-                    self.locks[primary_key] = (set(), transaction_id)
+            elif lock_type == "exclusive":
+                # If the transaction already holds an exclusive lock, nothing to do
+                if exclusive_lock_tid == transaction_id:
+                    return True
+                # If no locks are held, grant exclusive lock
+                if not shared_lock_tids and exclusive_lock_tid is None:
+                    self.locks[record_id] = (set(), transaction_id)
+                    return True
+                # Allow lock upgrade if this transaction is the only one holding a shared lock
+                if transaction_id in shared_lock_tids and len(shared_lock_tids) == 1 and exclusive_lock_tid is None:
+                    self.locks[record_id] = (set(), transaction_id)
                     return True
                 return False
 
-    def release_lock(self, transaction_id, primary_key):
+    def release_lock(self, transaction_id, record_id):
         """
-        Releases a lock held by a transaction on a specific record
-
-        Arguments:
-            transaction_id (int): The ID of the transaction releasing the lock
-            record_id (int): The ID of the record to unlock
+        Releases any lock held by the transaction on the record
+        If no locks remain, the record entry is removed
         """
         with self.mutex:
-            if primary_key not in self.locks:
+            # Do nothing if the record is not locked
+            if record_id not in self.locks:
                 return
 
-            check_locks, write_lock = self.locks[primary_key]
+            shared_lock_tids, exclusive_lock_tid = self.locks[record_id]
 
-            if transaction_id in check_locks:
-                check_locks.remove(transaction_id)
-            if write_lock == transaction_id:
-                write_lock = None
+            # Remove the transaction from the shared locks if it holds one
+            if transaction_id in shared_lock_tids:
+                shared_lock_tids.remove(transaction_id)
 
-            self.locks[primary_key] = (check_locks, write_lock)
+            # Clear the exclusive lock if this transaction holds it
+            if exclusive_lock_tid == transaction_id:
+                exclusive_lock_tid = None
 
-            if not check_locks and write_lock is None:
-                del self.locks[primary_key]
-
-    def upgrade_lock(self, transaction_id, primary_key):
-            """
-            Upgrades a CHECK lock to a WRITE lock if possible.
-            """
-            with self.mutex:
-                if primary_key not in self.locks:
-                    return False
-
-                check_locks, write_lock = self.locks[primary_key]
-
-                if transaction_id in check_locks and write_lock is None:
-                    check_locks.remove(transaction_id)
-                    self.locks[primary_key] = (check_locks, transaction_id)
-                    return True
-                return False
-
+            # If no locks remain, remove the entry; otherwise update it
+            if not shared_lock_tids and exclusive_lock_tid is None:
+                del self.locks[record_id]
+            else:
+                self.locks[record_id] = (shared_lock_tids, exclusive_lock_tid)
